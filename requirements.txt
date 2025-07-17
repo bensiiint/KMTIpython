@@ -1,0 +1,57 @@
+# ICAD File Manager - Dependencies
+# Core dependencies for the ICAD File Manager application
+
+# GUI Framework (usually included with Python)
+# tkinter>=8.6.0  # Included with Python
+
+# Database
+# sqlite3>=3.0.0  # Included with Python
+
+# Image Processing (for file preview)
+Pillow>=9.0.0
+
+# File System Monitoring
+watchdog>=2.1.0
+
+# File Type Detection
+python-magic>=0.4.27
+
+# Date/Time Handling
+python-dateutil>=2.8.0
+
+# JSON Handling (included with Python)
+# json  # Included with Python
+
+# Path Handling (included with Python)
+# pathlib  # Included with Python
+
+# Optional Dependencies (for enhanced functionality)
+
+# Excel/CSV Processing
+openpyxl>=3.0.0
+
+# PDF Processing
+PyPDF2>=2.0.0
+
+# Archive Handling
+patoolib>=1.12.0
+
+# Development Dependencies (optional)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=22.0.0
+# flake8>=5.0.0
+
+# Platform-specific dependencies
+
+# Windows specific
+pywin32>=304; platform_system=="Windows"
+
+# Linux specific
+python-magic-bin>=0.4.14; platform_system=="Linux"
+
+# macOS specific
+# No specific dependencies for macOS
+
+# Minimum Python version
+# python_requires>=3.8
