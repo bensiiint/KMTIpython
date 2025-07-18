@@ -10,12 +10,12 @@ class Settings:
     """Application settings and constants"""
     
     # Application Info
-    APP_NAME = "ICAD File Manager"
+    APP_NAME = "ICD File Manager"
     APP_VERSION = "1.0.0"
     APP_AUTHOR = "Engineering Team"
     
-    # File Extensions
-    ICAD_EXTENSIONS = ['.icad', '.dwg', '.dxf', '.ifc', '.step', '.stp']
+    # File Extensions - Only .icd files
+    ICAD_EXTENSIONS = ['.icd']
     
     # Database Settings
     DB_NAME = "icad_files.db"
@@ -77,7 +77,7 @@ class Settings:
     
     @classmethod
     def is_icad_file(cls, file_path):
-        """Check if file is an ICAD file based on extension"""
+        """Check if file is a .icd file based on extension"""
         return Path(file_path).suffix.lower() in cls.ICAD_EXTENSIONS
     
     @classmethod

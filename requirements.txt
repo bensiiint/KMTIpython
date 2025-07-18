@@ -1,5 +1,5 @@
-# ICAD File Manager - Dependencies
-# Core dependencies for the ICAD File Manager application
+# ICD File Manager - Enhanced Dependencies
+# Core dependencies for the ICD File Manager application with 3D preview support
 
 # GUI Framework (usually included with Python)
 # tkinter>=8.6.0  # Included with Python
@@ -7,8 +7,24 @@
 # Database
 # sqlite3>=3.0.0  # Included with Python
 
-# Image Processing (for file preview)
+# Essential Image Processing (for file preview and thumbnails)
 Pillow>=9.0.0
+
+# 3D Model Processing Libraries
+# Choose ONE of these main 3D libraries for rendering STEP files converted from ICD:
+
+# Option 1: Open3D (Recommended for 3D model rendering)
+# Pros: Excellent rendering, good STEP support when files are converted
+# Cons: Larger download size (~100MB)
+open3d>=0.16.0
+
+# Option 2: Trimesh (Alternative, lighter weight)
+# Pros: Smaller size, good for basic 3D operations
+# Cons: Less robust than Open3D for complex models
+# trimesh>=3.15.0
+
+# Mathematical Operations (for 3D transformations)
+numpy>=1.21.0
 
 # File System Monitoring
 watchdog>=2.1.0
@@ -53,5 +69,34 @@ python-magic-bin>=0.4.14; platform_system=="Linux"
 # macOS specific
 # No specific dependencies for macOS
 
-# Minimum Python version
-# python_requires>=3.8
+# Installation Notes:
+# ==================
+# 
+# RECOMMENDED INSTALLATION ORDER FOR ICD FILES:
+# 1. pip install Pillow numpy
+# 2. pip install open3d
+# 3. pip install watchdog python-magic python-dateutil
+# 4. pip install remaining optional dependencies
+#
+# ALTERNATIVE LIGHTWEIGHT SETUP:
+# 1. pip install Pillow numpy
+# 2. pip install trimesh
+# 3. pip install watchdog python-magic python-dateutil
+#
+# TROUBLESHOOTING:
+# - If Open3D fails to install, try: pip install open3d --no-cache-dir
+# - If python-magic fails on Windows, try: pip install python-magic-bin
+#
+# MINIMUM SETUP (basic functionality only):
+# pip install Pillow watchdog python-dateutil
+#
+# ICD FILE SUPPORT NOTES:
+# - This app focuses specifically on .icd files
+# - 3D thumbnails are generated using multiple fallback methods:
+#   1. Converting ICD to STEP files (if conversion tools available)
+#   2. Finding existing thumbnail images alongside ICD files
+#   3. Extracting embedded thumbnails from ICD files
+#   4. Using ICD CLI tools for thumbnail generation
+#   5. Creating placeholder thumbnails with file information
+#
+# Minimum Python version: 3.8+

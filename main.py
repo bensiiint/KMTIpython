@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
 """
-ICAD File Explorer - Direct File System Access
-A file explorer specifically designed for ICAD files with instant search and preview.
-No database needed - works directly with your file system.
+Enhanced main.py with ICAD Screen Capture Integration
+Adds automated isometric thumbnail generation to your existing ICD File Explorer
 """
 
 import tkinter as tk
@@ -16,23 +14,17 @@ import time
 import re
 from typing import List, Dict, Any, Optional
 
+# Import the screen capture system
+from icad_screen_capture import ICADScreenCapture, ThumbnailWorker
+
 class Settings:
     """Application settings"""
-    APP_NAME = "ICAD File Explorer"
+    APP_NAME = "ICD File Explorer"
     APP_VERSION = "1.0.0"
     
-    # Supported file extensions
+    # Supported file extensions - Only .icd files
     ICAD_EXTENSIONS = {
-        '.icad': 'ICAD File',
-        '.dwg': 'AutoCAD Drawing',
-        '.dxf': 'AutoCAD Exchange',
-        '.ifc': 'Industry Foundation Classes',
-        '.step': 'STEP 3D Model',
-        '.stp': 'STEP 3D Model',
-        '.pdf': 'PDF Document',
-        '.png': 'PNG Image',
-        '.jpg': 'JPEG Image',
-        '.jpeg': 'JPEG Image'
+        '.icd': 'ICAD Document'
     }
     
     # UI Settings
@@ -185,7 +177,7 @@ class FileInfo:
         return f"{size:.1f} {size_names[i]}"
 
 class ICADFileExplorer:
-    """Main ICAD File Explorer Application"""
+    """Main ICAD File Explorer Application with Screen Capture Thumbnails"""
     
     def __init__(self):
         self.current_folder = None
@@ -194,6 +186,11 @@ class ICADFileExplorer:
         self.selected_file = None
         self.search_timer = None
         self.scan_thread = None
+        
+        # Initialize screen capture system
+        self.screen_capture = ICADScreenCapture()
+        self.thumbnail_worker = None
+        self.current_thumbnail_image = None
         
         # Setup GUI
         self.setup_gui()
@@ -242,6 +239,8 @@ class ICADFileExplorer:
         file_menu.add_command(label="Open Project Folder...", command=self.select_folder, accelerator="Ctrl+O")
         file_menu.add_command(label="Refresh", command=self.refresh_current_folder, accelerator="F5")
         file_menu.add_separator()
+        file_menu.add_command(label="Clear Thumbnail Cache", command=self.clear_thumbnail_cache)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
         
         # View menu
@@ -249,6 +248,8 @@ class ICADFileExplorer:
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_command(label="Refresh", command=self.refresh_current_folder, accelerator="F5")
         view_menu.add_command(label="Clear Search", command=self.clear_search, accelerator="Esc")
+        view_menu.add_separator()
+        view_menu.add_command(label="Regenerate Thumbnail", command=self.regenerate_thumbnail)
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -308,7 +309,7 @@ class ICADFileExplorer:
         # Left panel (file list)
         self.create_file_list_panel()
         
-        # Right panel (preview)
+        # Right panel (preview with thumbnail)
         self.create_preview_panel()
         
         # Set initial pane sizes
@@ -372,6 +373,7 @@ class ICADFileExplorer:
         self.context_menu.add_command(label="Open", command=self.open_selected_file)
         self.context_menu.add_command(label="Open Folder", command=self.open_selected_folder)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="Generate Thumbnail", command=self.regenerate_thumbnail)
         self.context_menu.add_command(label="Copy Path", command=self.copy_selected_path)
         self.context_menu.add_command(label="Properties", command=self.show_file_properties)
         
@@ -379,7 +381,7 @@ class ICADFileExplorer:
         self.file_tree.bind('<Button-3>', self.show_context_menu)
     
     def create_preview_panel(self):
-        """Create preview panel"""
+        """Create preview panel with thumbnail support"""
         right_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(right_frame, weight=1)
         
@@ -397,18 +399,44 @@ class ICADFileExplorer:
         self.open_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         self.folder_btn = ttk.Button(button_frame, text="Folder", command=self.open_selected_folder, state=tk.DISABLED)
-        self.folder_btn.pack(side=tk.LEFT)
+        self.folder_btn.pack(side=tk.LEFT, padx=(0, 5))
         
-        # Preview content
-        self.preview_text = tk.Text(right_frame, wrap=tk.WORD, width=50, height=30, 
+        self.thumbnail_btn = ttk.Button(button_frame, text="🖼️ Thumbnail", command=self.regenerate_thumbnail, state=tk.DISABLED)
+        self.thumbnail_btn.pack(side=tk.LEFT)
+        
+        # Notebook for tabs
+        self.notebook = ttk.Notebook(right_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Thumbnail tab
+        self.thumbnail_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.thumbnail_frame, text="Thumbnail")
+        
+        # Thumbnail display area
+        self.thumbnail_canvas = tk.Canvas(self.thumbnail_frame, bg='white', width=400, height=300)
+        self.thumbnail_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Thumbnail status
+        self.thumbnail_status = ttk.Label(self.thumbnail_frame, text="Select a file to generate thumbnail")
+        self.thumbnail_status.pack(pady=5)
+        
+        # Progress bar for thumbnail generation
+        self.thumbnail_progress = ttk.Progressbar(self.thumbnail_frame, mode='indeterminate')
+        
+        # Details tab
+        self.details_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.details_frame, text="Details")
+        
+        # Details content
+        self.details_text = tk.Text(self.details_frame, wrap=tk.WORD, height=20, 
                                    font=('Consolas', 9))
-        preview_scrollbar = ttk.Scrollbar(right_frame, orient=tk.VERTICAL, command=self.preview_text.yview)
-        self.preview_text.configure(yscrollcommand=preview_scrollbar.set)
+        details_scrollbar = ttk.Scrollbar(self.details_frame, orient=tk.VERTICAL, command=self.details_text.yview)
+        self.details_text.configure(yscrollcommand=details_scrollbar.set)
         
-        self.preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        preview_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.details_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        details_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Initial preview message
+        # Initial message
         self.show_preview_message("Select a file to preview its information...")
     
     def create_status_bar(self):
@@ -426,13 +454,19 @@ class ICADFileExplorer:
     
     def show_welcome(self):
         """Show welcome message"""
-        self.show_preview_message(f"""Welcome to {Settings.APP_NAME}!
+        welcome_msg = f"""Welcome to {Settings.APP_NAME} with ICAD Thumbnails!
 
-🎯 Quick Start:
-1. Click "📁 Select Project Folder" to choose your ICAD project folder
-2. Browse and search through your files instantly
-3. Click on any file to preview its information
-4. Double-click to open files in their default application
+🎯 New Features:
+• Automated isometric thumbnail generation
+• Screen capture from ICAD
+• Cached thumbnails for fast loading
+• Real-time preview of your 3D models
+
+🚀 Quick Start:
+1. Click "📁 Select Project Folder" to choose your project folder
+2. Browse and search through your .icd files instantly
+3. Click on any file to generate isometric thumbnail
+4. Thumbnails are cached for instant reload
 
 🔍 Search Tips:
 • Search across all file information or select specific fields
@@ -446,7 +480,18 @@ class ICADFileExplorer:
 • Esc: Clear search
 • Enter: Open selected file
 
-Ready to boost your productivity? Select a project folder to begin!""")
+🖼️ Thumbnail Features:
+• Automatic isometric view capture
+• Fast 3-5 second generation
+• Cached for instant loading
+• Right-click to regenerate
+
+📋 Supported File Types:
+• .icd - ICAD Documents
+
+Ready to see your 3D models instantly? Select a project folder to begin!"""
+        
+        self.show_preview_message(welcome_msg)
     
     def select_folder(self):
         """Select project folder"""
@@ -465,7 +510,7 @@ Ready to boost your productivity? Select a project folder to begin!""")
         self.progress_bar.pack(side=tk.LEFT, padx=(10, 0))
         self.progress_bar.start()
         self.ready_label.config(text="Scanning...")
-        self.status_var.set("Scanning folder for ICAD files...")
+        self.status_var.set("Scanning folder for .icd files...")
         
         # Start scan in background thread
         if self.scan_thread and self.scan_thread.is_alive():
@@ -507,7 +552,7 @@ Ready to boost your productivity? Select a project folder to begin!""")
         self.apply_filters()
         
         count = len(files)
-        self.status_var.set(f"Found {count} ICAD files in {self.current_folder.name}")
+        self.status_var.set(f"Found {count} .icd files in {self.current_folder.name}")
         
         # Show summary in preview
         self.show_folder_summary()
@@ -534,6 +579,13 @@ Ready to boost your productivity? Select a project folder to begin!""")
             type_counts[file_type] = type_counts.get(file_type, 0) + 1
             total_size += file_info.size
         
+        # Check for cached thumbnails
+        cached_thumbnails = 0
+        for file_info in self.all_files:
+            thumbnail_path = self.screen_capture.get_thumbnail_path(str(file_info.path))
+            if thumbnail_path and thumbnail_path.exists():
+                cached_thumbnails += 1
+        
         # Format summary
         summary = f"""📁 Folder Summary: {self.current_folder.name}
 
@@ -541,6 +593,10 @@ Ready to boost your productivity? Select a project folder to begin!""")
 • Total Files: {len(self.all_files):,}
 • Total Size: {self._format_size(total_size)}
 • Folder Path: {self.current_folder}
+
+🖼️ Thumbnail Status:
+• Cached Thumbnails: {cached_thumbnails}/{len(self.all_files)}
+• Cache Directory: {self.screen_capture.cache_dir}
 
 📋 File Types:
 """
@@ -556,8 +612,14 @@ Ready to boost your productivity? Select a project folder to begin!""")
 
 💡 Next Steps:
 • Search for specific files or projects
-• Click on files to see detailed information
+• Click on files to generate thumbnails
 • Double-click to open files
+• Right-click for more options
+
+🖼️ Thumbnail Generation:
+• First thumbnail takes 3-5 seconds
+• Subsequent loads are instant (cached)
+• Thumbnails show isometric view from ICAD
 """
         
         self.show_preview_message(summary)
@@ -641,13 +703,18 @@ Ready to boost your productivity? Select a project folder to begin!""")
                 if file_info.name == filename:
                     self.selected_file = file_info
                     self.show_file_preview(file_info)
+                    self.load_thumbnail(file_info)
+                    
+                    # Enable buttons
                     self.open_btn.config(state=tk.NORMAL)
                     self.folder_btn.config(state=tk.NORMAL)
+                    self.thumbnail_btn.config(state=tk.NORMAL)
                     break
         else:
             self.selected_file = None
             self.open_btn.config(state=tk.DISABLED)
             self.folder_btn.config(state=tk.DISABLED)
+            self.thumbnail_btn.config(state=tk.DISABLED)
     
     def show_file_preview(self, file_info: FileInfo):
         """Show file preview"""
@@ -671,21 +738,155 @@ Ready to boost your productivity? Select a project folder to begin!""")
 • Drawing #: {file_info.drawing_number or 'Not detected'}
 • Revision: {file_info.revision or 'Not detected'}
 
+🖼️ Thumbnail Information:
+• Thumbnail: {"Cached" if self.screen_capture.get_thumbnail_path(str(file_info.path)) and self.screen_capture.get_thumbnail_path(str(file_info.path)).exists() else "Not generated"}
+• Cache Directory: {self.screen_capture.cache_dir}
+
 💡 Actions:
 • Double-click to open file
 • Right-click for more options
+• Use "🖼️ Thumbnail" button to regenerate
 • Use "Open" button to launch file
 • Use "Folder" button to open containing folder
 """
         
         self.show_preview_message(preview_text)
     
+    def load_thumbnail(self, file_info: FileInfo):
+        """Load or generate thumbnail for file"""
+        if not file_info:
+            return
+        
+        # Clear current thumbnail
+        self.thumbnail_canvas.delete("all")
+        self.current_thumbnail_image = None
+        
+        # Check if thumbnail already exists
+        thumbnail_path = self.screen_capture.get_thumbnail_path(str(file_info.path))
+        
+        if thumbnail_path and thumbnail_path.exists():
+            # Load existing thumbnail
+            self.display_thumbnail(str(thumbnail_path))
+            self.thumbnail_status.config(text=f"Cached thumbnail: {file_info.name}")
+        else:
+            # Generate new thumbnail
+            self.generate_thumbnail(file_info)
+    
+    def generate_thumbnail(self, file_info: FileInfo):
+        """Generate thumbnail for file"""
+        if not file_info:
+            return
+        
+        # Show loading state
+        self.thumbnail_canvas.delete("all")
+        self.thumbnail_canvas.create_text(200, 150, text="Generating thumbnail...\n\nPlease wait 3-5 seconds", 
+                                         font=('TkDefaultFont', 12), fill='gray')
+        
+        self.thumbnail_progress.pack(pady=10)
+        self.thumbnail_progress.start()
+        
+        self.thumbnail_status.config(text=f"Generating thumbnail for {file_info.name}...")
+        
+        # Cancel any existing thumbnail generation
+        if self.thumbnail_worker and self.thumbnail_worker.is_alive():
+            return
+        
+        # Start thumbnail generation in background
+        self.thumbnail_worker = ThumbnailWorker(
+            str(file_info.path),
+            self.screen_capture,
+            self.on_thumbnail_generated
+        )
+        self.thumbnail_worker.start()
+    
+    def on_thumbnail_generated(self, thumbnail_path: str, error: str):
+        """Handle thumbnail generation completion"""
+        # Stop loading animation
+        self.thumbnail_progress.stop()
+        self.thumbnail_progress.pack_forget()
+        
+        if error:
+            self.thumbnail_canvas.delete("all")
+            self.thumbnail_canvas.create_text(200, 150, text=f"Error generating thumbnail:\n{error}", 
+                                             font=('TkDefaultFont', 10), fill='red')
+            self.thumbnail_status.config(text=f"Error: {error}")
+        elif thumbnail_path:
+            self.display_thumbnail(thumbnail_path)
+            self.thumbnail_status.config(text=f"Thumbnail generated: {Path(thumbnail_path).name}")
+        else:
+            self.thumbnail_canvas.delete("all")
+            self.thumbnail_canvas.create_text(200, 150, text="Could not generate thumbnail", 
+                                             font=('TkDefaultFont', 10), fill='red')
+            self.thumbnail_status.config(text="Thumbnail generation failed")
+    
+    def display_thumbnail(self, thumbnail_path: str):
+        """Display thumbnail in canvas"""
+        try:
+            from PIL import Image, ImageTk
+            
+            # Load thumbnail
+            image = Image.open(thumbnail_path)
+            
+            # Convert to PhotoImage
+            self.current_thumbnail_image = ImageTk.PhotoImage(image)
+            
+            # Clear canvas and display image
+            self.thumbnail_canvas.delete("all")
+            
+            # Center image in canvas
+            canvas_width = self.thumbnail_canvas.winfo_width()
+            canvas_height = self.thumbnail_canvas.winfo_height()
+            
+            if canvas_width > 1 and canvas_height > 1:  # Canvas is properly sized
+                x = canvas_width // 2
+                y = canvas_height // 2
+            else:
+                x = 200  # Default position
+                y = 150
+            
+            self.thumbnail_canvas.create_image(x, y, image=self.current_thumbnail_image)
+            
+        except Exception as e:
+            self.thumbnail_canvas.delete("all")
+            self.thumbnail_canvas.create_text(200, 150, text=f"Error displaying thumbnail:\n{str(e)}", 
+                                             font=('TkDefaultFont', 10), fill='red')
+    
+    def regenerate_thumbnail(self):
+        """Regenerate thumbnail for selected file"""
+        if not self.selected_file:
+            return
+        
+        # Delete cached thumbnail
+        thumbnail_path = self.screen_capture.get_thumbnail_path(str(self.selected_file.path))
+        if thumbnail_path and thumbnail_path.exists():
+            thumbnail_path.unlink()
+        
+        # Generate new thumbnail
+        self.generate_thumbnail(self.selected_file)
+    
+    def clear_thumbnail_cache(self):
+        """Clear all cached thumbnails"""
+        try:
+            import shutil
+            if self.screen_capture.cache_dir.exists():
+                shutil.rmtree(self.screen_capture.cache_dir)
+                self.screen_capture.cache_dir.mkdir()
+            
+            messagebox.showinfo("Cache Cleared", "All cached thumbnails have been cleared.")
+            
+            # Refresh preview if file is selected
+            if self.selected_file:
+                self.load_thumbnail(self.selected_file)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear cache: {e}")
+    
     def show_preview_message(self, message: str):
         """Show message in preview area"""
-        self.preview_text.config(state=tk.NORMAL)
-        self.preview_text.delete(1.0, tk.END)
-        self.preview_text.insert(tk.END, message)
-        self.preview_text.config(state=tk.DISABLED)
+        self.details_text.config(state=tk.NORMAL)
+        self.details_text.delete(1.0, tk.END)
+        self.details_text.insert(tk.END, message)
+        self.details_text.config(state=tk.DISABLED)
     
     def on_file_double_click(self, event):
         """Handle double-click on file"""
@@ -741,6 +942,8 @@ Ready to boost your productivity? Select a project folder to begin!""")
         
         # Properties content
         file_info = self.selected_file
+        thumbnail_path = self.screen_capture.get_thumbnail_path(str(file_info.path))
+        
         properties = f"""File Properties: {file_info.name}
 
 General:
@@ -759,6 +962,11 @@ Project Information:
 • Company: {file_info.company_name or 'Not detected'}
 • Drawing Number: {file_info.drawing_number or 'Not detected'}
 • Revision: {file_info.revision or 'Not detected'}
+
+Thumbnail Information:
+• Thumbnail Status: {"Available" if thumbnail_path and thumbnail_path.exists() else "Not generated"}
+• Thumbnail Path: {thumbnail_path or "Not generated"}
+• Cache Directory: {self.screen_capture.cache_dir}
 
 Technical:
 • Extension: {file_info.suffix}
@@ -814,24 +1022,31 @@ Technical:
         """Show about dialog"""
         about_text = f"""{Settings.APP_NAME} v{Settings.APP_VERSION}
 
-A specialized file explorer for ICAD files.
+A specialized file explorer for .icd files with automated thumbnail generation.
 
 Features:
 • Direct file system access (no database)
 • Instant search and filtering
 • File metadata extraction
+• Automated ICAD thumbnail generation
+• Screen capture technology
+• Thumbnail caching system
 • Real-time preview
 • Keyboard shortcuts
 
 Supported file types:
 {chr(10).join(f'• {ext}: {desc}' for ext, desc in Settings.ICAD_EXTENSIONS.items())}
 
-Built for engineering productivity!
+Built for engineering productivity with ICAD integration!
 """
         messagebox.showinfo("About", about_text)
     
     def on_closing(self):
         """Handle application closing"""
+        # Clean up any running processes
+        if self.thumbnail_worker and self.thumbnail_worker.is_alive():
+            print("Waiting for thumbnail generation to complete...")
+        
         self.root.destroy()
     
     def run(self):
@@ -841,6 +1056,7 @@ Built for engineering productivity!
 def main():
     """Main entry point"""
     print(f"Starting {Settings.APP_NAME} v{Settings.APP_VERSION}")
+    print("With ICAD Screen Capture Integration")
     
     try:
         app = ICADFileExplorer()
